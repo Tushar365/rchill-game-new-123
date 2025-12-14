@@ -16,11 +16,16 @@ body {
   overflow-x: hidden;
   height: 100%;
   overscroll-behavior: none;
+  touch-action: none;
 }
 
 body {
-  font-family: 'Arial', sans-serif;
-  background: linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%); /* Pink to Blue gradient */
+  font-family: "Arial", sans-serif;
+  background: linear-gradient(
+    135deg,
+    #fbc2eb 0%,
+    #a6c1ee 100%
+  ); /* Pink to Blue gradient */
   overflow: hidden;
 }
 
@@ -47,7 +52,7 @@ body {
   font-size: 2rem;
   font-weight: bold;
   color: white;
-  text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .progress-bar {
@@ -84,7 +89,7 @@ body {
   font-size: 1.2rem;
   font-weight: bold;
   color: white;
-  text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
   white-space: nowrap;
 }
 
@@ -132,7 +137,7 @@ body {
   font-weight: bold;
   padding: 15px 40px;
   border-radius: 50px;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
   cursor: pointer;
   transition: all 0.1s;
 }
@@ -180,11 +185,19 @@ body {
 
 /* Animations */
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes bounce {
-  from { transform: translateY(0); }
-  to { transform: translateY(-20px); }
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-20px);
+  }
 }

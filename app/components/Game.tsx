@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Celebration from './Celebration';
 
 // Types for our game objects
 type Projectile = {
@@ -19,154 +20,198 @@ type Particle = {
   emoji: string;
 };
 
-import Celebration from './Celebration';
-
 export default function Game() {
   const [kissCount, setKissCount] = useState(0);
-  const [projectiles, setProjectiles] = useState<Projectile[]>([]);
-  const [particles, setParticles] = useState<Particle[]>([]);
   const [isCelebration, setIsCelebration] = useState(false);
   const [combo, setCombo] = useState(0);
   
-  // Use refs for game state that needs to be accessed in animation loop
-  const requestRef = useRef<number>(0);
-  const lastTimeRef = useRef<number>(0);
+  // Canvas & Game State Refs
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const bearRef = useRef<HTMLDivElement>(null);
+  
   const projectilesRef = useRef<Projectile[]>([]);
   const particlesRef = useRef<Particle[]>([]);
+  
+  const lastTimeRef = useRef<number>(0);
   const cooldownRef = useRef(0);
-  const comboTimerRef = useRef<number>(0);
+  const comboTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Constants
   const TARGET_KISSES = 10;
   const HIT_COOLDOWN = 800;
   const PROJECTILE_SPEED = 6;
-  const COMBO_WINDOW = 2000; // 2 seconds to maintain combo
-
-  // Sync refs with state
+  const COMBO_WINDOW = 2000;
+  
+  // Initialize Canvas & Preload Assets
   useEffect(() => {
-    projectilesRef.current = projectiles;
-  }, [projectiles]);
+    const handleResize = () => {
+      if (canvasRef.current) {
+        canvasRef.current.width = window.innerWidth;
+        canvasRef.current.height = window.innerHeight;
+      }
+    };
+    
+    window.addEventListener('resize', handleResize);
+    handleResize(); // Initial size
+    
+    // Preload Audio Assets
+    const audioFiles = ['/kiss.wav', '/OHYESH.mp3', '/i-love.mp3'];
+    audioFiles.forEach(src => {
+      const audio = new Audio(src);
+      audio.load();
+    });
+    
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
-  useEffect(() => {
-    particlesRef.current = particles;
-  }, [particles]);
-
-  // Game loop
+  // Game Loop
   useEffect(() => {
     let animationId: number;
     
-    const gameLoop = (currentTime: number) => {
+    const render = (currentTime: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      
       const deltaTime = lastTimeRef.current ? currentTime - lastTimeRef.current : 0;
-      lastTimeRef.current = currentTime;
+      lastTimeRef.current = currentTime; // Always update lastTime
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       
       if (!isCelebration && deltaTime > 0) {
-        updateGame(deltaTime);
+        updateAndDrawGame(ctx);
       }
       
-      animationId = requestAnimationFrame(gameLoop);
+      animationId = requestAnimationFrame(render);
     };
     
-    animationId = requestAnimationFrame(gameLoop);
+    animationId = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animationId);
-  }, [isCelebration]);
+  }, [isCelebration]); // Re-bind if celebration state changes
 
-  // Combo timer
+  // Combo Timer Logic
   useEffect(() => {
     if (combo > 0) {
-      const timer = setTimeout(() => {
+      if (comboTimerRef.current) clearTimeout(comboTimerRef.current);
+      comboTimerRef.current = setTimeout(() => {
         setCombo(0);
       }, COMBO_WINDOW);
-      return () => clearTimeout(timer);
     }
-  }, [combo, COMBO_WINDOW]);
+    return () => {
+      if (comboTimerRef.current) clearTimeout(comboTimerRef.current);
+    };
+  }, [combo]);
 
-  // Update Game Logic (now with delta time for consistent movement)
-  const updateGame = (deltaTime: number) => {
-    const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 1000;
-    const screenHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
-    const bearX = screenWidth - 100;
+  const updateAndDrawGame = (ctx: CanvasRenderingContext2D) => {
+    const screenWidth = ctx.canvas.width;
+    const screenHeight = ctx.canvas.height;
+    
+    // Positioning logic (must match CSS)
+    // Bear is at right: 15%. so x ≈ width * 0.85
+    const bearX = screenWidth * 0.85; 
     const bearY = screenHeight / 2;
     
-    // Update Projectiles with collision detection
+    // --- UPDATE PROJECTILES ---
     const updatedProjectiles = projectilesRef.current.map(p => ({
       ...p,
       x: p.x + PROJECTILE_SPEED
     }));
     
     const hitProjectiles: number[] = [];
-    const remainingProjectiles = updatedProjectiles.filter((p, index) => {
-      // Check collision with bear (circular hitbox)
+    const remainingProjectiles: Projectile[] = [];
+
+    updatedProjectiles.forEach((p, index) => {
+      // Draw Projectile
+      ctx.font = '32px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('💋', p.x, p.y);
+      
+      // Hit Detection
       const dx = p.x - bearX;
       const dy = p.y - bearY;
       const distance = Math.sqrt(dx * dx + dy * dy);
       
-      if (distance < 60) { // Hit radius
-        hitProjectiles.push(index);
-        return false;
+      // Bear radius approx 60px (since font size is 2.5rem - 5rem depending on screen)
+      // Let's assume a generous hit box
+      if (distance < 80) {
+         hitProjectiles.push(index);
+      } else if (p.x < screenWidth + 50) {
+        // Keep if on screen
+        remainingProjectiles.push(p);
       }
-      
-      return p.x < screenWidth;
     });
     
-    // Process hits
+    // Process Hits
     if (hitProjectiles.length > 0) {
+      // Only process the first hit per frame/group to avoid double counting if multiple hit at once
       handleHit(bearX, bearY);
     }
     
-    setProjectiles(remainingProjectiles);
+    projectilesRef.current = remainingProjectiles;
     
-    // Update Particles
-    const updatedParticles = particlesRef.current.map(p => ({
-      ...p,
-      x: p.x + p.vx,
-      y: p.y + p.vy,
-      vy: p.vy + 0.5, // gravity
-      life: p.life - 0.015
-    })).filter(p => p.life > 0);
+    // --- UPDATE PARTICLES ---
+    const updatedParticles: Particle[] = [];
     
-    setParticles(updatedParticles);
+    particlesRef.current.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.5; // Gravity
+      p.life -= 0.015;
+      
+      if (p.life > 0) {
+        ctx.globalAlpha = p.life;
+        ctx.font = '24px serif';
+        
+        // Save context to rotate/scale
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.scale(p.life, p.life);
+        ctx.fillText(p.emoji, 0, 0);
+        ctx.restore();
+        
+        updatedParticles.push(p);
+      }
+    });
+    ctx.globalAlpha = 1.0;
+    particlesRef.current = updatedParticles;
   };
 
-  // Spawn Particles with more variety
-  const spawnParticles = (x: number, y: number, isCombo: boolean = false) => {
-    const particleCount = isCombo ? 25 : 15;
+  const spawnParticles = (x: number, y: number, isComboHit: boolean = false) => {
+    const particleCount = isComboHit ? 25 : 15;
     const newParticles: Particle[] = [];
-    const emojis = isCombo 
+    const emojis = isComboHit 
       ? ['💖', '💕', '✨', '💋', '🌟', '💫']
       : ['💖', '💕', '✨', '💋'];
     
     for (let i = 0; i < particleCount; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const velocity = 2 + Math.random() * 6;
+        
       newParticles.push({
         id: Math.random(),
         x: x,
         y: y,
-        vx: (Math.random() - 0.5) * (isCombo ? 20 : 15),
-        vy: (Math.random() - 0.5) * (isCombo ? 20 : 15) - 5, // bias upward
+        vx: Math.cos(angle) * velocity,
+        vy: Math.sin(angle) * velocity - 2, // Slight upward bias
         life: 1.0,
         emoji: emojis[Math.floor(Math.random() * emojis.length)]
       });
     }
-    setParticles(prev => [...prev, ...newParticles]);
+    particlesRef.current = [...particlesRef.current, ...newParticles];
   };
 
-  // Handle Hit Logic with combo system
   const handleHit = (x: number, y: number) => {
     const now = Date.now();
-    if (now - cooldownRef.current < HIT_COOLDOWN) {
-      return;
-    }
+    if (now - cooldownRef.current < HIT_COOLDOWN) return;
+    
     cooldownRef.current = now;
-
-    // Update combo
+    
+    // Update State
     setCombo(prev => prev + 1);
-
-    // Play Hit Sound
-    const audio = new Audio('/ohyesh.mp3');
-    audio.volume = 0.5;
-    audio.play().catch(e => console.error("Audio play failed (hit)", e));
-
-    // Update kiss count
     setKissCount(prev => {
       const newCount = prev + 1;
       if (newCount >= TARGET_KISSES) {
@@ -175,245 +220,182 @@ export default function Game() {
       return newCount;
     });
 
-    // Visual feedback based on combo
+    // Audio
+    const audio = new Audio('/OHYESH.mp3');
+    audio.volume = 0.5;
+    audio.play().catch(e => console.error("Audio play failed", e));
+    
+    // Animate Bear
     if (bearRef.current) {
-      const intensity = Math.min(combo, 5);
-      bearRef.current.animate([
-        { transform: 'translateY(-50%) scale(1) rotate(0deg)' },
-        { transform: `translateY(-50%) scale(${1.1 + intensity * 0.05}) translate(-${intensity * 2}px, ${intensity * 2}px) rotate(-${intensity * 2}deg)` },
-        { transform: `translateY(-50%) scale(${1.1 + intensity * 0.05}) translate(${intensity * 2}px, -${intensity * 2}px) rotate(${intensity * 2}deg)` },
-        { transform: 'translateY(-50%) scale(1) rotate(0deg)' }
-      ], {
-        duration: 400,
-        easing: 'ease-out'
-      });
+        const el = bearRef.current;
+        el.style.transform = 'translateY(-50%) scale(1.2) rotate(10deg)';
+        setTimeout(() => {
+            el.style.transform = 'translateY(-50%) scale(1) rotate(0deg)';
+        }, 200);
     }
 
-    // Spawn Particles (more for combos)
     spawnParticles(x, y, combo > 2);
   };
   
   const shootKiss = () => {
     if (isCelebration) return;
     
-    // Play Kiss Sound
     const audio = new Audio('/kiss.wav');
     audio.volume = 0.4;
-    audio.play().catch(e => console.error("Audio play failed (shoot)", e));
+    audio.play().catch(() => {});
 
-    // Spawn projectile at rabbit position
-    const screenHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
-    const newProjectile: Projectile = {
-      id: Date.now() + Math.random(), // More unique IDs
-      x: 150, 
-      y: screenHeight / 2
-    };
-    setProjectiles(prev => [...prev, newProjectile]);
+    // Spawn projectile from Rabbit Position
+    // Rabbit is at left: 15%. 
+    const startX = window.innerWidth * 0.15 + 40; // Approx offset
+    const startY = window.innerHeight / 2;
+    
+    projectilesRef.current.push({
+      id: Date.now() + Math.random(),
+      x: startX,
+      y: startY
+    });
   };
 
   const restartGame = () => {
     setKissCount(0);
     setCombo(0);
     setIsCelebration(false);
-    setProjectiles([]);
-    setParticles([]);
+    projectilesRef.current = [];
+    particlesRef.current = [];
     cooldownRef.current = 0;
     lastTimeRef.current = 0;
   };
 
   return (
-    <div style={{
-      position: 'fixed',
-      inset: 0,
+    <div className="game-container" style={{
+      position: 'fixed', inset: 0,
       background: 'linear-gradient(135deg, #ffeef8 0%, #ffe0f0 100%)',
       overflow: 'hidden',
-      fontFamily: 'system-ui, -apple-system, sans-serif'
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+      touchAction: 'none' // Prevent scrolling/zooming gestures
     }}>
       
+      {/* Canvas Layer */}
+      <canvas 
+        ref={canvasRef}
+        style={{
+            position: 'absolute',
+            inset: 0,
+            pointerEvents: 'none',
+            zIndex: 1
+        }}
+      />
+      
       {/* Celebration Overlay */}
-      {isCelebration && (
-        <Celebration onRestartAction={restartGame} />
-      )}
+      {isCelebration && <Celebration onRestartAction={restartGame} />}
 
-      {/* Score / Progress */}
-      <div style={{
-        position: 'absolute',
-        top: '2rem',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        textAlign: 'center',
-        zIndex: 10
-      }}>
-        <h2 style={{
-          fontSize: '2rem',
-          color: '#ff1493',
-          margin: '0 0 0.5rem 0',
-          textShadow: '2px 2px 4px rgba(0,0,0,0.1)'
-        }}>
+      {/* UI Layer */}
+      <div style={{ position: 'absolute', top: '2rem', left: 0, right: 0, 
+                    textAlign: 'center', zIndex: 10, pointerEvents: 'none' }}>
+        <h2 style={{ fontSize: 'clamp(1.5rem, 5vw, 2.5rem)', color: '#ff1493', 
+                     textShadow: '2px 2px 4px rgba(0,0,0,0.1)', margin: 0 }}>
            Kisses: {kissCount} / {TARGET_KISSES}
         </h2>
         {combo > 1 && (
-          <div style={{
-            fontSize: '1.5rem',
-            fontWeight: 'bold',
-            color: '#ff6b6b',
-            textShadow: '0 0 10px rgba(255, 107, 107, 0.5)',
-            animation: 'pulse 0.5s ease-in-out infinite',
-            marginTop: '0.5rem'
-          }}>
+          <div style={{ fontSize: 'clamp(1.2rem, 4vw, 2rem)', color: '#ff6b6b', fontWeight: 'bold',
+                        animation: 'pulse 0.5s infinite' }}>
             🔥 {combo}x COMBO!
           </div>
         )}
+        
+        {/* Progress Bar */}
         <div style={{
-          width: '300px',
-          height: '20px',
-          backgroundColor: 'rgba(255, 255, 255, 0.5)',
-          borderRadius: '10px',
-          overflow: 'hidden',
-          border: '2px solid #ff69b4',
-          marginTop: '1rem'
+            width: '60%', maxWidth: '300px', height: '20px',
+            margin: '1rem auto',
+            background: 'rgba(255,255,255,0.5)',
+            border: '2px solid #ff69b4', borderRadius: '10px',
+            overflow: 'hidden'
         }}>
-          <div style={{
-            height: '100%',
-            backgroundColor: '#ff1493',
-            width: `${(kissCount / TARGET_KISSES) * 100}%`,
-            transition: 'width 0.3s ease-out',
-            boxShadow: '0 0 10px rgba(255, 20, 147, 0.5)'
-          }} />
+           <div style={{
+             height: '100%',
+             width: `${(kissCount / TARGET_KISSES) * 100}%`,
+             background: '#ff1493',
+             transition: 'width 0.3s ease-out'
+           }} />
         </div>
       </div>
 
-      {/* Rabbit (Rinni) */}
+      {/* Characters Layer */}
+      
+      {/* Rinni (Rabbit) */}
       <div 
         onClick={shootKiss}
+        onTouchStart={(e) => { e.preventDefault(); shootKiss(); }}
         style={{
           position: 'absolute',
-          left: '100px',
+          left: '15%',
           top: '50%',
           transform: 'translateY(-50%)',
-          fontSize: '5rem',
+          fontSize: 'clamp(3rem, 10vw, 5rem)',
           cursor: 'pointer',
+          zIndex: 5,
           userSelect: 'none',
-          transition: 'transform 0.1s',
-          filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.2))'
+          WebkitUserSelect: 'none'
         }}
-        onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)'}
-        onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(-50%) scale(1)'}
+        className="character"
       >
         🐰
-        <div style={{
-          fontSize: '1rem',
-          textAlign: 'center',
-          color: '#ff1493',
-          fontWeight: 'bold',
-          marginTop: '0.5rem'
-        }}>
-          Rinni
+        <div style={{ fontSize: '1rem', textAlign: 'center', color: '#ff1493', fontWeight: 'bold' }}>
+            Rinni
         </div>
       </div>
 
-      {/* Bear (Tushar) */}
+      {/* Tushar (Bear) */}
       <div 
         ref={bearRef}
         style={{
           position: 'absolute',
-          right: '100px',
+          right: '15%',
           top: '50%',
           transform: 'translateY(-50%)',
-          fontSize: '5rem',
+          fontSize: 'clamp(3rem, 10vw, 5rem)',
+          zIndex: 5,
+          transition: 'transform 0.2s',
           userSelect: 'none',
-          filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.2))'
+          WebkitUserSelect: 'none'
         }}
+        className="character"
       >
         🐻
-        <div style={{
-          fontSize: '1rem',
-          textAlign: 'center',
-          color: '#ff1493',
-          fontWeight: 'bold',
-          marginTop: '0.5rem'
-        }}>
-          Tushar
+        <div style={{ fontSize: '1rem', textAlign: 'center', color: '#ff1493', fontWeight: 'bold' }}>
+           Tushar
         </div>
       </div>
 
-      {/* Projectiles */}
-      {projectiles.map(p => (
-        <div 
-          key={p.id}
-          style={{
-            position: 'absolute',
-            left: p.x,
-            top: p.y,
-            fontSize: '2rem',
-            transform: 'translate(-50%, -50%)',
-            pointerEvents: 'none',
-            filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))'
-          }}
-        >
-          💋
-        </div>
-      ))}
-
-      {/* Particles */}
-      {particles.map(p => (
-        <div 
-          key={p.id}
-          style={{
-            position: 'absolute',
-            left: p.x,
-            top: p.y,
-            fontSize: '1.5rem',
-            opacity: p.life,
-            transform: `translate(-50%, -50%) scale(${p.life})`,
-            pointerEvents: 'none',
-            transition: 'opacity 0.1s, transform 0.1s'
-          }}
-        >
-          {p.emoji}
-        </div>
-      ))}
-
-      {/* Mobile Control Button */}
-      <div style={{
-        position: 'absolute',
-        bottom: '3rem',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 10
-      }}>
-        <button 
-          onClick={shootKiss}
-          disabled={isCelebration}
-          style={{
-            padding: '1.5rem 3rem',
-            fontSize: '1.5rem',
-            fontWeight: 'bold',
-            backgroundColor: '#ff1493',
-            color: 'white',
-            border: 'none',
-            borderRadius: '50px',
-            cursor: isCelebration ? 'not-allowed' : 'pointer',
-            boxShadow: '0 4px 12px rgba(255, 20, 147, 0.4)',
-            transition: 'all 0.2s',
-            opacity: isCelebration ? 0.5 : 1
-          }}
-          onMouseEnter={(e) => !isCelebration && (e.currentTarget.style.transform = 'scale(1.05)')}
-          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-        >
-          TAP TO KISS 💋
-        </button>
+      {/* Controls */}
+      <div style={{ position: 'absolute', bottom: '10%', left: 0, right: 0, textAlign: 'center', zIndex: 10 }}>
+         <button 
+           onClick={shootKiss}
+           onTouchStart={(e) => { e.preventDefault(); shootKiss(); }}
+           disabled={isCelebration}
+           style={{
+             padding: '1rem 2rem',
+             fontSize: '1.2rem',
+             fontWeight: 'bold',
+             backgroundColor: '#ff1493',
+             color: 'white',
+             border: 'none',
+             borderRadius: '50px',
+             boxShadow: '0 4px 12px rgba(255, 20, 147, 0.4)',
+             opacity: isCelebration ? 0.5 : 1
+           }}
+         >
+           TAP TO KISS 💋
+         </button>
       </div>
-
-      <style>{`
+      
+      <style jsx global>{`
         @keyframes pulse {
           0%, 100% { transform: scale(1); }
           50% { transform: scale(1.1); }
         }
-        
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
+        body {
+            overscroll-behavior: none;
         }
       `}</style>
     </div>
